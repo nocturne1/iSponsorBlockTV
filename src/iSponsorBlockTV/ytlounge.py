@@ -156,7 +156,6 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         elif event_type == "autoplayUpNext":
             create_task(self.set_auto_play_mode(self.auto_play))
             self._autoplay_pending = not self.auto_play
-            self._video_duration = 0.0  # reset so _reschedule_end_pause waits for onStateChange
             self._reschedule_end_pause()
             if len(args) > 0 and (vid_id := args[0]["videoId"]):  # if video id is not empty
                 self.logger.info(f"Getting segments for next video: {vid_id}")
@@ -220,6 +219,9 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             return
         elapsed = asyncio.get_event_loop().time() - self._video_start_wall
         current_pos = self._video_start_pos + elapsed
+        if current_pos > self._video_duration:
+            # Timing data is stale (e.g. _video_start_wall never set) or video already ended
+            return
         pause_in = self._video_duration - current_pos - 0.5  # pause 0.5s before end
         if pause_in < 0:
             pause_in = 0.1
