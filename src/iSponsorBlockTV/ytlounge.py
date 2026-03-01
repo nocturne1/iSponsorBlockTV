@@ -40,6 +40,11 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             self.mute_ads = config.mute_ads
             self.skip_ads = config.skip_ads
             self.auto_play = config.auto_play
+        self._autoplay_pending = False
+        self._video_duration = 0.0
+        self._video_start_wall = 0.0
+        self._video_start_pos = 0.0
+        self._end_pause_task = None
         self._command_mutex = asyncio.Lock()
 
     # Ensures that we still are subscribed to the lounge
@@ -112,7 +117,14 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         # (that way we can get the segments)
         if event_type == "onStateChange":
             data = args[0]
-            # print(data)
+            if data["state"] == "1":
+                duration = float(data.get("duration", 0))
+                current_time = float(data.get("currentTime", 0))
+                if duration > 0:
+                    self._video_duration = duration
+                    self._video_start_wall = asyncio.get_event_loop().time()
+                    self._video_start_pos = current_time
+                    self._reschedule_end_pause()
             # Unmute when the video starts playing
             if self.mute_ads and data["state"] == "1":
                 create_task(self.mute(False, override=True))
@@ -142,6 +154,9 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             self.volume_state = args[0]
         # Gets segments for the next video before it starts playing
         elif event_type == "autoplayUpNext":
+            create_task(self.set_auto_play_mode(self.auto_play))
+            self._autoplay_pending = not self.auto_play
+            self._reschedule_end_pause()
             if len(args) > 0 and (vid_id := args[0]["videoId"]):  # if video id is not empty
                 self.logger.info(f"Getting segments for next video: {vid_id}")
                 create_task(self.api_helper.get_segments(vid_id))
@@ -194,6 +209,27 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             create_task(self.get_now_playing())
 
         super()._process_event(event_type, args)
+
+    def _reschedule_end_pause(self):
+        """Cancel any pending end-of-video pause and reschedule based on current position."""
+        if self._end_pause_task and not self._end_pause_task.done():
+            self._end_pause_task.cancel()
+            self._end_pause_task = None
+        if not self._autoplay_pending or self._video_duration <= 0:
+            return
+        elapsed = asyncio.get_event_loop().time() - self._video_start_wall
+        current_pos = self._video_start_pos + elapsed
+        pause_in = self._video_duration - current_pos - 0.5  # pause 0.5s before end
+        if pause_in < 0:
+            pause_in = 0.1
+
+        async def _pause_at_end():
+            await asyncio.sleep(pause_in)
+            if self._autoplay_pending:
+                self._autoplay_pending = False
+                await self.pause()
+
+        self._end_pause_task = create_task(_pause_at_end())
 
     # Set the volume to a specific value (0-100)
     async def set_volume(self, volume: int) -> None:
