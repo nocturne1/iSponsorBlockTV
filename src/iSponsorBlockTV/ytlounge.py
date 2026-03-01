@@ -156,6 +156,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         elif event_type == "autoplayUpNext":
             create_task(self.set_auto_play_mode(self.auto_play))
             self._autoplay_pending = not self.auto_play
+            self._video_duration = 0.0  # reset so _reschedule_end_pause waits for onStateChange
             self._reschedule_end_pause()
             if len(args) > 0 and (vid_id := args[0]["videoId"]):  # if video id is not empty
                 self.logger.info(f"Getting segments for next video: {vid_id}")
