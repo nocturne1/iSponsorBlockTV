@@ -131,7 +131,7 @@ class Config:
     default=lambda: os.getenv("iSPBTV_data_dir") or user_data_dir("iSponsorBlockTV", "dmunozv04"),
     help="data directory",
 )
-@click.option("--debug", is_flag=True, help="debug mode")
+@click.option("--debug", is_flag=True, envvar="iSPBTV_debug", help="debug mode")
 @click.option("--http-tracing", is_flag=True, help="Enable HTTP request/response tracing")
 # legacy commands as arguments
 @click.option("--setup", is_flag=True, help="Setup the program graphically", hidden=True)
