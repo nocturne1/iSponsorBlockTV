@@ -124,6 +124,11 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                     self._video_duration = duration
                     self._video_start_wall = asyncio.get_event_loop().time()
                     self._video_start_pos = current_time
+                    # If auto_play is off but we're past 90% without a pending pause,
+                    # we likely missed the autoplayUpNext event (e.g. during a reconnect)
+                    if not self.auto_play and not self._autoplay_pending and current_time > duration * 0.9:
+                        self.logger.info("Missed autoplayUpNext detected, scheduling end pause")
+                        self._autoplay_pending = True
                     self._reschedule_end_pause()
             # Unmute when the video starts playing
             if self.mute_ads and data["state"] == "1":
