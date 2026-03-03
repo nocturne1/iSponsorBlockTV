@@ -119,10 +119,19 @@ class DeviceListener:
     async def skip(self, time_to, position, uuids):
         await asyncio.sleep(time_to)
         self.logger.info("Skipping segment: seeking to %s", position)
+        lc = self.lounge_controller
         await asyncio.gather(
-            asyncio.create_task(self.lounge_controller.seek_to(position)),
+            asyncio.create_task(lc.seek_to(position)),
             asyncio.create_task(self.api_helper.mark_viewed_segments(uuids)),
         )
+        if (
+            not lc.auto_play
+            and lc._video_duration > 0
+            and position >= lc._video_duration - 1
+        ):
+            self.logger.info("Segment skip reached end of video, pausing to prevent autoplay")
+            lc._autoplay_pending = False
+            await lc.pause()
 
     async def cancel(self):
         self.cancelled = True
