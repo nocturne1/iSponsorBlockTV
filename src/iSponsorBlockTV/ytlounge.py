@@ -235,6 +235,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             await asyncio.sleep(pause_in)
             if self._autoplay_pending:
                 self._autoplay_pending = False
+                self.logger.info("Pausing at end of video to prevent autoplay")
                 await self.pause()
 
         self._end_pause_task = create_task(_pause_at_end())
