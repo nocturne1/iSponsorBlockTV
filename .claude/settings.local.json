@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(git:*)",
+      "Bash(ssh:*)",
+      "Bash(/tmp/autoplay2.patch:*)",
+      "Bash(scp:*)",
+      "Bash(gh run:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "WebFetch(domain:komo.do)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(pip show:*)",
+      "Bash(git show:*)",
+      "Bash(.venv/bin/pip download \"pyytlounge==2.0.0\" \"pyytlounge==2.1.1\" \"pyytlounge==2.2.1\" -d /tmp/pyytlounge_versions --no-deps)",
+      "Bash(.venv/bin/pip download \"pyytlounge==2.0.0\" -d /tmp/pyytlounge_v200 --no-deps)",
+      "Bash(.venv/bin/pip download \"pyytlounge==2.1.1\" -d /tmp/pyytlounge_v211 --no-deps)",
+      "Bash(.venv/bin/pip download \"pyytlounge==2.2.1\" -d /tmp/pyytlounge_v221 --no-deps)"
+    ]
+  }
+}
