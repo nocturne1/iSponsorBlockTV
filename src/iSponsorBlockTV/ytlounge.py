@@ -185,9 +185,6 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                 data = args[0]
                 if data["reason"] == "disconnectedByUserScreenInitiated":  # Short playing?
                     self.shorts_disconnected = True
-        elif event_type == "onAutoplayModeChanged":
-            create_task(self.set_auto_play_mode(self.auto_play))
-
         elif event_type == "onPlaybackSpeedChanged":
             data = args[0]
             self.playback_speed = float(data.get("playbackSpeed", "1"))
