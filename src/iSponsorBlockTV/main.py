@@ -92,9 +92,17 @@ class DeviceListener:
             if segments:  # If there are segments
                 await self.time_to_segment(segments, state.currentTime, time_start)
             if not self.lounge_controller.auto_play and state.duration > 0:
-                if state.duration - 60 < state.currentTime < state.duration - 1.5:
-                    self.logger.info("Near end of video at %.1fs, pausing to prevent autoplay", state.currentTime)
-                    asyncio.create_task(self.lounge_controller.pause())
+                elapsed = time.monotonic() - time_start
+                time_remaining = (state.duration - state.currentTime) / self.lounge_controller.playback_speed
+                time_to_pause = time_remaining - elapsed - 2.0
+                if time_to_pause > 0:
+                    self.logger.info(
+                        "Scheduling end-of-video pause in %.1fs (at %.1fs of %.1fs)",
+                        time_to_pause, state.currentTime, state.duration,
+                    )
+                    await asyncio.sleep(time_to_pause)
+                    self.logger.info("Pausing at end of video to prevent autoplay")
+                    await self.lounge_controller.pause()
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, time_start):
