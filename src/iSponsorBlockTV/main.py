@@ -22,7 +22,6 @@ class DeviceListener:
         self.lounge_controller = ytlounge.YtLoungeApi(
             device.screen_id, config, api_helper, self.logger
         )
-        self._end_pause_task: Optional[asyncio.Task] = None
 
     # Ensures that we have a valid auth token
     async def refresh_auth_loop(self):
@@ -85,8 +84,6 @@ class DeviceListener:
 
     # Processes the playback state change
     async def process_playstatus(self, state, time_start):
-        if self._end_pause_task and not self._end_pause_task.done():
-            self._end_pause_task.cancel()
         segments = []
         if state.videoId:
             segments = await self.api_helper.get_segments(state.videoId)
@@ -95,17 +92,11 @@ class DeviceListener:
             if segments:  # If there are segments
                 await self.time_to_segment(segments, state.currentTime, time_start)
             if not self.lounge_controller.auto_play and state.duration > 0:
-                time_to_end = (
-                    state.duration - 1.5 - state.currentTime - (time.monotonic() - time_start)
-                ) / self.lounge_controller.playback_speed
-                if time_to_end > 0:
-                    self.logger.debug("Scheduling end-pause in %.1fs", time_to_end)
-                    self._end_pause_task = asyncio.create_task(self._pause_at_end(time_to_end))
-
-    async def _pause_at_end(self, delay):
-        await asyncio.sleep(delay)
-        self.logger.info("Pausing near end of video to prevent autoplay")
-        await self.lounge_controller.pause()
+                pause_at = state.duration - 2.0
+                if state.duration - 30 < state.currentTime < pause_at - 0.5:
+                    self.logger.info("Near end of video, seeking to %.1fs and pausing to prevent autoplay", pause_at)
+                    asyncio.create_task(self.lounge_controller.seek_to(pause_at))
+                    asyncio.create_task(self.lounge_controller.pause())
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, time_start):
@@ -144,15 +135,12 @@ class DeviceListener:
         await self.lounge_controller.disconnect()
         if self.task:
             self.task.cancel()
-        if self._end_pause_task:
-            self._end_pause_task.cancel()
         if self.lounge_controller.subscribe_task_watchdog:
             self.lounge_controller.subscribe_task_watchdog.cancel()
         if self.lounge_controller.subscribe_task:
             self.lounge_controller.subscribe_task.cancel()
         await asyncio.gather(
             self.task,
-            self._end_pause_task,
             self.lounge_controller.subscribe_task_watchdog,
             self.lounge_controller.subscribe_task,
             return_exceptions=True,
