@@ -93,7 +93,7 @@ class DeviceListener:
                 await self.time_to_segment(segments, state.currentTime, time_start)
             if not self.lounge_controller.auto_play and state.duration > 0:
                 pause_at = state.duration - 2.0
-                if state.duration - 30 < state.currentTime < pause_at - 0.5:
+                if state.duration - 60 < state.currentTime < pause_at - 0.5:
                     self.logger.info("Near end of video, seeking to %.1fs and pausing to prevent autoplay", pause_at)
                     asyncio.create_task(self.lounge_controller.seek_to(pause_at))
                     asyncio.create_task(self.lounge_controller.pause())
