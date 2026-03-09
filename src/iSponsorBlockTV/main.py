@@ -84,10 +84,9 @@ class DeviceListener:
         # Cancel end-of-video pause only on playing state events; transitional
         # states (buffering, stopped) must not cancel it or natural end is missed
         if state.state.value == 1:
-            try:
+            if self._end_pause_task and not self._end_pause_task.done():
+                self.logger.debug("Cancelling end-of-video pause (new playing event, state=%s)", state.state.value)
                 self._end_pause_task.cancel()
-            except BaseException:
-                pass
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
     # Processes the playback state change
@@ -113,7 +112,10 @@ class DeviceListener:
     async def _pause_at_end(self, delay):
         await asyncio.sleep(delay)
         self.logger.info("Pausing at end of video to prevent autoplay")
-        await self.lounge_controller.pause()
+        try:
+            await self.lounge_controller.pause()
+        except Exception:
+            self.logger.exception("Failed to send pause command at end of video")
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, time_start):
