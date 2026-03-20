@@ -185,6 +185,9 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                 data = args[0]
                 if data["reason"] == "disconnectedByUserScreenInitiated":  # Short playing?
                     self.shorts_disconnected = True
+        elif event_type == "onAutoplayModeChanged":
+            create_task(self.set_auto_play_mode(self.auto_play))
+
         elif event_type == "onPlaybackSpeedChanged":
             data = args[0]
             self.playback_speed = float(data.get("playbackSpeed", "1"))
@@ -246,7 +249,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "AID": self._last_event_id,
             "gsessionid": self._gsession,
             "device": "REMOTE_CONTROL",
-            "app": "youtube-desktop",
+            "app": "ytios-phone-20.15.1",
             "VER": "8",
             "v": "2",
         }
@@ -257,20 +260,24 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             raise NotLinkedException("Not linked")
 
         connect_body = {
-            "app": "web",
-            "mdx-version": "3",
-            "name": self.device_name,
             "id": self.auth.screen_id,
-            "device": "REMOTE_CONTROL",
-            "capabilities": "dsdtr,atp",
-            "method": "setPlaylist",
-            "magnaKey": "cloudPairedDevice",
-            "ui": "false",
-            "deviceContext": "user_agent=dunno&window_width_points=&window_height_points=&os_name=android&ms=",
+            "mdx-version": "3",
+            "TYPE": "xmlhttp",
             "theme": "cl",
+            "sessionSource": "MDX_SESSION_SOURCE_UNKNOWN",
+            "connectParams": '{"setStatesParams": "{"playbackSpeed":0}"}',
+            "RID": "1",
+            "CVER": "1",
+            "capabilities": "que,dsdtr,atp,vsp",
+            "ui": "false",
+            "app": "ytios-phone-20.15.1",
+            "pairing_type": "manual",
+            "VER": "8",
             "loungeIdToken": self.auth.lounge_id_token,
+            "device": "REMOTE_CONTROL",
+            "name": self.device_name,
         }
-        connect_url = f"{api_base}/bc/bind?RID=1&VER=8&CVER=1&auth_failure_option=send_error"
+        connect_url = f"{api_base}/bc/bind"
         async with self.session.post(url=connect_url, data=connect_body) as resp:
             try:
                 text = await resp.text()
@@ -314,7 +321,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "sessionNonce": str(uuid4()),
             "RID": "1",
             "CVER": "1",
-            "capabilities": "dsdtr,atp",
+            "capabilities": "que,dsdtr,atp,vsp",
             "ui": "false",
             "app": "ytios-phone-20.15.1",
             "pairing_type": "manual",
