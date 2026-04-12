@@ -73,6 +73,12 @@ class DeviceListener:
                 await sub
             except BaseException:
                 pass
+            if lounge_controller.shorts_disconnected:
+                self.logger.info(
+                    "Disconnected by Shorts player, waiting 5 minutes before reconnecting"
+                )
+                lounge_controller.shorts_disconnected = False
+                await asyncio.sleep(300)
 
     # Method called on playback state change
     async def __call__(self, state):

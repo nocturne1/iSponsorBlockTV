@@ -176,10 +176,10 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
 
         elif event_type == "onSubtitlesTrackChanged":
             if self.shorts_disconnected:
-                data = args[0]
-                video_id_saved = data.get("videoId", None)
+                # Don't call play_video() here — this event fires during Shorts
+                # navigation and would kick the user back to the regular player.
+                # The reconnect delay in loop() handles post-Shorts recovery.
                 self.shorts_disconnected = False
-                create_task(self.play_video(video_id_saved))
         elif event_type == "loungeScreenDisconnected":
             if args:  # Sometimes it's empty
                 data = args[0]
