@@ -93,19 +93,6 @@ class DeviceListener:
             if self._end_pause_task and not self._end_pause_task.done():
                 self.logger.debug("Cancelling end-of-video pause (new playing event, state=%s)", state.state.value)
                 self._end_pause_task.cancel()
-        elif state.state.value == 0 and not self.lounge_controller.auto_play:
-            # Fallback: video ended naturally without the sleep-based pause firing
-            # (e.g. after a connection drop where currentTime was stale and the
-            # sleep timer ran too long). Fire an untracked pause task immediately
-            # so it survives the upcoming state=1 cancel for the next video.
-            if (state.duration is not None and state.currentTime is not None
-                    and state.duration > 0
-                    and state.currentTime >= state.duration - 1.0):
-                self.logger.info(
-                    "Video ended (state=0 at %.1fs/%.1fs), firing fallback pause to prevent autoplay",
-                    state.currentTime, state.duration,
-                )
-                asyncio.create_task(self._pause_at_end(0))
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
     # Processes the playback state change
@@ -118,8 +105,13 @@ class DeviceListener:
             if not self.lounge_controller.auto_play and state.duration > 0:
                 elapsed = time.monotonic() - time_start
                 time_remaining = (state.duration - state.currentTime) / self.lounge_controller.playback_speed
-                time_to_pause = time_remaining - elapsed - 3.0
-                if time_to_pause > 0:
+                # Use a 20s buffer to account for event delivery lag: the
+                # currentTime in lounge events can be 10-15s behind actual
+                # playback (e.g. after a connection drop). Firing 20s before the
+                # *reported* end guarantees the pause arrives before the video
+                # actually ends, even with stale data.
+                time_to_pause = max(1.0, time_remaining - elapsed - 20.0)
+                if time_remaining > 1.0:
                     self.logger.info(
                         "Scheduling end-of-video pause in %.1fs (at %.1fs of %.1fs)",
                         time_to_pause, state.currentTime, state.duration,
