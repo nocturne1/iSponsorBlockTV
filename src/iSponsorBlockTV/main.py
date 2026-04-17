@@ -105,13 +105,8 @@ class DeviceListener:
             if not self.lounge_controller.auto_play and state.duration > 0:
                 elapsed = time.monotonic() - time_start
                 time_remaining = (state.duration - state.currentTime) / self.lounge_controller.playback_speed
-                # Use a 20s buffer to account for event delivery lag: the
-                # currentTime in lounge events can be 10-15s behind actual
-                # playback (e.g. after a connection drop). Firing 20s before the
-                # *reported* end guarantees the pause arrives before the video
-                # actually ends, even with stale data.
-                time_to_pause = max(1.0, time_remaining - elapsed - 20.0)
-                if time_remaining > 1.0:
+                time_to_pause = time_remaining - elapsed - 2.0
+                if time_to_pause > 0:
                     self.logger.info(
                         "Scheduling end-of-video pause in %.1fs (at %.1fs of %.1fs)",
                         time_to_pause, state.currentTime, state.duration,
