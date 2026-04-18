@@ -183,31 +183,14 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         elif event_type == "loungeScreenDisconnected":
             if args:  # Sometimes it's empty
                 data = args[0]
-                self.logger.info("loungeScreenDisconnected reason=%s", data.get("reason"))
                 if data["reason"] == "disconnectedByUserScreenInitiated":  # Short playing?
                     self.shorts_disconnected = True
-            else:
-                self.logger.info("loungeScreenDisconnected (no args)")
         elif event_type == "onAutoplayModeChanged":
-            data = args[0]
-            current_mode = data.get("autoplayMode", "ENABLED")
-            desired_mode = "DISABLED" if not self.auto_play else "ENABLED"
-            if current_mode != desired_mode:
-                self.logger.info(
-                    "onAutoplayModeChanged: YouTube=%s desired=%s — sending set_auto_play_mode",
-                    current_mode, desired_mode,
-                )
-                create_task(self.set_auto_play_mode(self.auto_play))
-            else:
-                self.logger.info(
-                    "onAutoplayModeChanged: YouTube=%s desired=%s — no action needed",
-                    current_mode, desired_mode,
-                )
+            create_task(self.set_auto_play_mode(self.auto_play))
 
         elif event_type == "onPlaybackSpeedChanged":
             data = args[0]
             self.playback_speed = float(data.get("playbackSpeed", "1"))
-            self.logger.info("onPlaybackSpeedChanged: speed=%s — sending getNowPlaying", data.get("playbackSpeed"))
             create_task(self.get_now_playing())
 
         super()._process_event(event_type, args)
@@ -249,7 +232,6 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
     # the _command_offset (TODO: move to upstream if it works)
     async def _command(self, command: str, command_parameters: dict = None) -> bool:
         async with self._command_mutex:
-            self.logger.info(">>> sending command: %s %s", command, command_parameters or "")
             return await super()._command(command, command_parameters)
 
     async def change_web_session(self, web_session: ClientSession):
