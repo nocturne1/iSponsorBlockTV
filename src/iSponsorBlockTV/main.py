@@ -49,9 +49,17 @@ class DeviceListener:
                     await lounge_controller.refresh_auth()
                 except BaseException:
                     await asyncio.sleep(10)
+            unavailable_count = 0
             while not (await self.is_available()) and not self.cancelled:
                 self.logger.debug("Waiting for device to be available")
                 await asyncio.sleep(10)
+                unavailable_count += 1
+                if unavailable_count % 6 == 0:  # every ~60s, re-fetch the lounge token
+                    try:
+                        self.logger.debug("Refreshing auth while waiting for availability")
+                        await lounge_controller.refresh_auth()
+                    except BaseException:
+                        pass
             try:
                 await lounge_controller.connect()
             except BaseException:
