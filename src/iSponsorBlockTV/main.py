@@ -117,12 +117,17 @@ class DeviceListener:
 
     async def _pause_at_end(self, delay):
         await asyncio.sleep(delay)
-        self.logger.info("Pausing at end of video to prevent autoplay")
+        lc = self.lounge_controller
+        secs_since_event = asyncio.get_event_loop().time() - getattr(lc, "last_event_time", 0)
+        self.logger.info(
+            "Pausing at end of video (connected=%s, secs_since_last_event=%.1f)",
+            lc.connected(), secs_since_event,
+        )
         try:
-            if not self.lounge_controller.connected():
-                self.logger.warning("Not connected at end-of-video pause, attempting reconnect")
-                await self.lounge_controller.connect()
-            await self.lounge_controller.pause()
+            connected = await lc.connect()
+            self.logger.info("connect() returned %s before pause", connected)
+            await lc.pause()
+            self.logger.info("pause() sent successfully")
         except Exception:
             self.logger.exception("Failed to send pause command at end of video")
 
