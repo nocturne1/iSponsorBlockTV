@@ -35,7 +35,24 @@ class DeviceListener:
 
     async def is_available(self):
         try:
-            return await self.lounge_controller.is_available()
+            if await self.lounge_controller.is_available():
+                return True
+            # get_screen_availability can return empty even when the screen is
+            # reachable (e.g. after a lounge session reset). Fall back to a
+            # direct connect probe: if connect() sets _sid/_gsession the screen
+            # is actually up.
+            self.logger.debug(
+                "is_available() returned False, probing via connect()"
+            )
+            try:
+                connected = await self.lounge_controller.connect()
+                if connected:
+                    self.logger.info(
+                        "Screen reachable via connect() despite is_available()=False"
+                    )
+                return connected
+            except BaseException:
+                return False
         except BaseException:
             return False
 
@@ -49,17 +66,9 @@ class DeviceListener:
                     await lounge_controller.refresh_auth()
                 except BaseException:
                     await asyncio.sleep(10)
-            unavailable_count = 0
             while not (await self.is_available()) and not self.cancelled:
                 self.logger.debug("Waiting for device to be available")
                 await asyncio.sleep(10)
-                unavailable_count += 1
-                if unavailable_count % 6 == 0:  # every ~60s, re-fetch the lounge token
-                    try:
-                        self.logger.debug("Refreshing auth while waiting for availability")
-                        await lounge_controller.refresh_auth()
-                    except BaseException:
-                        pass
             try:
                 await lounge_controller.connect()
             except BaseException:
