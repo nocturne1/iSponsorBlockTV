@@ -172,9 +172,9 @@ class DeviceListener:
                 self._current_video_id,
             )
             return
-        if time.monotonic() >= expected_end - 1.0:
+        if time.monotonic() >= expected_end:
             self.logger.warning(
-                "Skipping pre-end pause for %s because wake-up was too close to end",
+                "Skipping pre-end pause for %s because wake-up was at or past expected end",
                 video_id,
             )
             return
