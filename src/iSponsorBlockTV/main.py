@@ -122,7 +122,7 @@ class DeviceListener:
             if not self.lounge_controller.auto_play and state.duration > 0:
                 elapsed = time.monotonic() - time_start
                 time_remaining = (state.duration - state.currentTime) / self.lounge_controller.playback_speed
-                time_to_pause = time_remaining - elapsed - 1.0
+                time_to_pause = time_remaining - elapsed - 5.0
                 if time_to_pause > 0:
                     self.logger.info(
                         "Scheduling end-of-video pause in %.1fs (at %.1fs of %.1fs)",
