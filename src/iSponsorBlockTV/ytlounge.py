@@ -37,6 +37,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         self.auto_play = True
         self.watchdog_running = False
         self.last_event_time = 0
+        self._autoplay_block_until = 0
+        self._last_video_id = None
         if config:
             self.mute_ads = config.mute_ads
             self.skip_ads = config.skip_ads
@@ -113,12 +115,36 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         # (that way we can get the segments)
         if event_type == "onStateChange":
             data = args[0]
+            duration = float(data.get("duration", 0) or 0)
+            current_time = float(data.get("currentTime", 0) or 0)
+            if (
+                not self.auto_play
+                and data.get("state") == "0"
+                and duration > 0
+                and current_time >= duration - 1
+            ):
+                create_task(self._block_autoplay_advance("ended state"))
             # print(data)
             # Unmute when the video starts playing
             if self.mute_ads and data["state"] == "1":
                 create_task(self.mute(False, override=True))
         elif event_type == "nowPlaying":
             data = args[0]
+            video_id = data.get("videoId")
+            if video_id:
+                if (
+                    not self.auto_play
+                    and self._last_video_id
+                    and video_id != self._last_video_id
+                    and asyncio.get_event_loop().time() < self._autoplay_block_until
+                ):
+                    self.logger.info(
+                        "Detected autoplay advance from %s to %s; pausing new video",
+                        self._last_video_id,
+                        video_id,
+                    )
+                    create_task(self.pause())
+                self._last_video_id = video_id
             # Unmute when the video starts playing
             if self.mute_ads and data.get("state", "0") == "1":
                 self.logger.info("Ad has ended, unmuting")
@@ -143,6 +169,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             self.volume_state = args[0]
         # Gets segments for the next video before it starts playing
         elif event_type == "autoplayUpNext":
+            if not self.auto_play:
+                create_task(self._block_autoplay_advance("autoplayUpNext"))
             if len(args) > 0 and (vid_id := args[0]["videoId"]):  # if video id is not empty
                 self.logger.info(f"Getting segments for next video: {vid_id}")
                 create_task(self.api_helper.get_segments(vid_id))
@@ -237,6 +265,15 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             await self.set_auto_play_mode(False)
         except Exception:
             self.logger.exception("Failed to enforce autoplay disabled after connect")
+
+    async def _block_autoplay_advance(self, reason):
+        self._autoplay_block_until = asyncio.get_event_loop().time() + 5
+        self.logger.info("Blocking autoplay advance after %s", reason)
+        try:
+            await self.set_auto_play_mode(False)
+            await self.pause()
+        except Exception:
+            self.logger.exception("Failed to block autoplay advance after %s", reason)
 
     # Test to wrap the command function in a mutex to avoid race conditions with
     # the _command_offset (TODO: move to upstream if it works)
