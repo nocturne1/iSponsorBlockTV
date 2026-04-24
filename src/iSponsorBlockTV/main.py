@@ -104,12 +104,6 @@ class DeviceListener:
             self.task.cancel()
         except BaseException:
             pass
-        # Cancel end-of-video pause only on playing state events; transitional
-        # states (buffering, stopped) must not cancel it or natural end is missed
-        if state.state.value == 1:
-            if self._end_pause_task and not self._end_pause_task.done():
-                self.logger.debug("Cancelling end-of-video pause (new playing event, state=%s)", state.state.value)
-                self._end_pause_task.cancel()
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
     # Processes the playback state change
@@ -120,33 +114,12 @@ class DeviceListener:
         if state.state.value == 1:  # Playing
             self.logger.info("Playing video %s with %d segments", state.videoId, len(segments))
             if not self.lounge_controller.auto_play and state.duration > 0:
-                elapsed = time.monotonic() - time_start
-                time_remaining = (state.duration - state.currentTime) / self.lounge_controller.playback_speed
-                time_to_pause = time_remaining - elapsed - 1.5
-                if time_to_pause > 0:
-                    self.logger.info(
-                        "Scheduling end-of-video pause in %.1fs (at %.1fs of %.1fs)",
-                        time_to_pause, state.currentTime, state.duration,
-                    )
-                    self._end_pause_task = asyncio.create_task(self._pause_at_end(time_to_pause))
+                self.logger.debug(
+                    "End-of-video pause fallback disabled for %s; relying on native handling",
+                    state.videoId,
+                )
             if segments:  # If there are segments
                 await self.time_to_segment(segments, state.currentTime, state.duration, time_start)
-
-    async def _pause_at_end(self, delay):
-        await asyncio.sleep(delay)
-        lc = self.lounge_controller
-        secs_since_event = asyncio.get_event_loop().time() - getattr(lc, "last_event_time", 0)
-        self.logger.info(
-            "Pausing at end of video (connected=%s, secs_since_last_event=%.1f)",
-            lc.connected(), secs_since_event,
-        )
-        try:
-            connected = await lc.connect()
-            self.logger.info("connect() returned %s before pause", connected)
-            await lc.pause()
-            self.logger.info("pause() sent successfully")
-        except Exception:
-            self.logger.exception("Failed to send pause command at end of video")
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, video_duration, time_start):
@@ -165,13 +138,13 @@ class DeviceListener:
                 start_next_segment = position if is_within_start_range else segment_start
                 break
         if start_next_segment:
-            # If auto_play is disabled and the segment ends within 2s of the video end,
-            # skip the seek — _end_pause_task will pause before the segment starts anyway
+            # If auto_play is disabled and a segment ends within 2s of the video end,
+            # let YouTube finish naturally so Watch Later can return to the list.
             if (not self.lounge_controller.auto_play and video_duration > 0
                     and next_segment["end"] >= video_duration - 2.0):
                 self.logger.info(
                     "Skipping segment seek to %.3fs (within 2s of video end %.3fs) — "
-                    "end-of-video pause will handle it",
+                    "native end-of-video handling will handle it",
                     next_segment["end"], video_duration,
                 )
                 return

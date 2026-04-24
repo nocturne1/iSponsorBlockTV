@@ -12,6 +12,7 @@ from uuid import uuid4
 from .constants import youtube_client_blacklist
 
 create_task = asyncio.create_task
+LOUNGE_CAPABILITIES = "que,dsdtr,atp"
 
 
 class YtLoungeApi(pyytlounge.YtLoungeApi):
@@ -228,6 +229,15 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
     async def get_now_playing(self):
         return await self._command("getNowPlaying")
 
+    async def _enforce_auto_play_mode(self):
+        if self.auto_play:
+            return
+        try:
+            self.logger.info("Enforcing autoplay disabled after connect")
+            await self.set_auto_play_mode(False)
+        except Exception:
+            self.logger.exception("Failed to enforce autoplay disabled after connect")
+
     # Test to wrap the command function in a mutex to avoid race conditions with
     # the _command_offset (TODO: move to upstream if it works)
     async def _command(self, command: str, command_parameters: dict = None) -> bool:
@@ -268,7 +278,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "connectParams": '{"setStatesParams": "{"playbackSpeed":0}"}',
             "RID": "1",
             "CVER": "1",
-            "capabilities": "que,dsdtr,atp,vsp",
+            "capabilities": LOUNGE_CAPABILITIES,
+            "method": "getNowPlaying",
             "ui": "false",
             "app": "ytios-phone-20.15.1",
             "pairing_type": "manual",
@@ -277,6 +288,11 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "device": "REMOTE_CONTROL",
             "name": self.device_name,
         }
+        self.logger.info(
+            "Connecting with passive Watch Later mode (method=%s, capabilities=%s)",
+            connect_body["method"],
+            connect_body["capabilities"],
+        )
         connect_url = f"{api_base}/bc/bind"
         async with self.session.post(url=connect_url, data=connect_body) as resp:
             try:
@@ -297,7 +313,11 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                 async for events in self._parse_event_chunks(as_aiter(lines)):
                     self._process_events(events)
                 self._command_offset = 1
-                return self.connected()
+                connected = self.connected()
+                self.logger.info("Passive connect completed (connected=%s)", connected)
+                if connected:
+                    await self._enforce_auto_play_mode()
+                return connected
             except:
                 self._logger.exception(
                     "Handle connect failed, status %s reason %s",
@@ -321,7 +341,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "sessionNonce": str(uuid4()),
             "RID": "1",
             "CVER": "1",
-            "capabilities": "que,dsdtr,atp,vsp",
+            "capabilities": LOUNGE_CAPABILITIES,
             "ui": "false",
             "app": "ytios-phone-20.15.1",
             "pairing_type": "manual",
