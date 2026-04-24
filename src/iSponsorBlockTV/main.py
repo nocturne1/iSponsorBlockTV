@@ -129,7 +129,7 @@ class DeviceListener:
                     (state.duration - state.currentTime)
                     / self.lounge_controller.playback_speed
                 )
-                pause_before_end = 5.0
+                pause_before_end = 1.5
                 time_to_pause = time_remaining - elapsed - pause_before_end
                 expected_end = time.monotonic() + max(time_remaining - elapsed, 0)
                 if time_to_pause > 0:
