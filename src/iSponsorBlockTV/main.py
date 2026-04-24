@@ -18,6 +18,7 @@ class DeviceListener:
         self.offset = device.offset
         self.name = device.name
         self.cancelled = False
+        self._current_video_id = None
         self.logger = logging.getLogger(f"iSponsorBlockTV-{device.screen_id}")
         self.web_session = web_session
         self.lounge_controller = ytlounge.YtLoungeApi(
@@ -104,6 +105,15 @@ class DeviceListener:
             self.task.cancel()
         except BaseException:
             pass
+        if state.videoId and state.videoId != self._current_video_id:
+            if self._end_pause_task and not self._end_pause_task.done():
+                self.logger.debug(
+                    "Cancelling pre-end pause for %s because playback moved to %s",
+                    self._current_video_id,
+                    state.videoId,
+                )
+                self._end_pause_task.cancel()
+            self._current_video_id = state.videoId
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
     # Processes the playback state change
@@ -114,12 +124,65 @@ class DeviceListener:
         if state.state.value == 1:  # Playing
             self.logger.info("Playing video %s with %d segments", state.videoId, len(segments))
             if not self.lounge_controller.auto_play and state.duration > 0:
-                self.logger.debug(
-                    "End-of-video pause fallback disabled for %s; relying on native handling",
-                    state.videoId,
+                elapsed = time.monotonic() - time_start
+                time_remaining = (
+                    (state.duration - state.currentTime)
+                    / self.lounge_controller.playback_speed
                 )
+                pause_before_end = 5.0
+                time_to_pause = time_remaining - elapsed - pause_before_end
+                expected_end = time.monotonic() + max(time_remaining - elapsed, 0)
+                if time_to_pause > 0:
+                    if self._end_pause_task and not self._end_pause_task.done():
+                        self.logger.debug(
+                            "Rescheduling pre-end pause for %s",
+                            state.videoId,
+                        )
+                        self._end_pause_task.cancel()
+                    self.logger.info(
+                        "Scheduling current-video pre-end pause for %s in %.1fs "
+                        "(%.1fs before %.1fs)",
+                        state.videoId,
+                        time_to_pause,
+                        pause_before_end,
+                        state.duration,
+                    )
+                    self._end_pause_task = asyncio.create_task(
+                        self._pause_current_video_before_end(
+                            state.videoId,
+                            time_to_pause,
+                            expected_end,
+                        )
+                    )
+                else:
+                    self.logger.info(
+                        "Not scheduling pre-end pause for %s; only %.1fs remaining",
+                        state.videoId,
+                        time_remaining,
+                    )
             if segments:  # If there are segments
                 await self.time_to_segment(segments, state.currentTime, state.duration, time_start)
+
+    async def _pause_current_video_before_end(self, video_id, delay, expected_end):
+        await asyncio.sleep(delay)
+        if video_id != self._current_video_id:
+            self.logger.info(
+                "Skipping pre-end pause for %s; current video is %s",
+                video_id,
+                self._current_video_id,
+            )
+            return
+        if time.monotonic() >= expected_end - 1.0:
+            self.logger.warning(
+                "Skipping pre-end pause for %s because wake-up was too close to end",
+                video_id,
+            )
+            return
+        try:
+            self.logger.info("Pausing current video %s before end", video_id)
+            await self.lounge_controller.pause()
+        except Exception:
+            self.logger.exception("Failed to pause current video %s before end", video_id)
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, video_duration, time_start):
