@@ -168,12 +168,23 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         elif event_type == "loungeStatus":
             data = args[0]
             devices = json.loads(data["devices"])
+            screen_seen = False
             for device in devices:
+                device_info = json.loads(device.get("deviceInfo", "{}"))
+                self.logger.debug(
+                    "loungeStatus device type=%s app=%s client=%s identity=%s",
+                    device.get("type"),
+                    device.get("app"),
+                    device_info.get("clientName") or device.get("clientName"),
+                    device.get("receiverIdentityMatchStatus"),
+                )
                 if device["type"] == "LOUNGE_SCREEN":
-                    device_info = json.loads(device.get("deviceInfo", "{}"))
+                    screen_seen = True
                     if device_info.get("clientName", "") in youtube_client_blacklist:
                         self._sid = None
                         self._gsession = None  # Force disconnect
+            if not screen_seen:
+                self.logger.info("loungeStatus did not include a LOUNGE_SCREEN receiver")
 
         elif event_type == "onSubtitlesTrackChanged":
             if self.shorts_disconnected:
@@ -281,7 +292,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "capabilities": LOUNGE_CAPABILITIES,
             "method": "getNowPlaying",
             "ui": "false",
-            "app": "web",
+            "app": "ytios-phone-20.15.1",
+            "pairing_type": "manual",
             "magnaKey": "cloudPairedDevice",
             "deviceContext": "user_agent=dunno&window_width_points=&window_height_points=&os_name=android&ms=",
             "VER": "8",
@@ -290,7 +302,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "name": self.device_name,
         }
         self.logger.info(
-            "Connecting with passive Watch Later mode (method=%s, capabilities=%s)",
+            "Connecting with hybrid Watch Later mode (app=%s, method=%s, capabilities=%s)",
+            connect_body["app"],
             connect_body["method"],
             connect_body["capabilities"],
         )
