@@ -164,7 +164,28 @@ class DeviceListener:
                 await self.time_to_segment(segments, state.currentTime, state.duration, time_start)
 
     async def _pause_current_video_before_end(self, video_id, delay, expected_end):
-        await asyncio.sleep(delay)
+        if delay > 90:
+            # Sleep most of the delay, then request a position refresh ~60s before
+            # expected end to correct for long-sleep drift.  The nowPlaying response
+            # will cancel and reschedule this task with corrected timing.
+            await asyncio.sleep(max(delay - 60, 0))
+            if video_id != self._current_video_id:
+                self.logger.info(
+                    "Skipping pre-end pause for %s; current video is %s",
+                    video_id,
+                    self._current_video_id,
+                )
+                return
+            self.logger.debug("Requesting position refresh for %s before end", video_id)
+            try:
+                await self.lounge_controller.get_now_playing()
+            except Exception:
+                pass
+            remaining = expected_end - time.monotonic() - 1.5
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+        else:
+            await asyncio.sleep(delay)
         if video_id != self._current_video_id:
             self.logger.info(
                 "Skipping pre-end pause for %s; current video is %s",
