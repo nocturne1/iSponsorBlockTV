@@ -199,6 +199,12 @@ class DeviceListener:
                 video_id,
             )
             return
+        if not self.lounge_controller.has_lounge_screen():
+            self.logger.warning(
+                "Skipping pre-end pause for %s because no LOUNGE_SCREEN receiver is attached",
+                video_id,
+            )
+            return
         try:
             self.logger.info("Pausing current video %s before end", video_id)
             await self.lounge_controller.pause()

@@ -37,6 +37,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         self.auto_play = True
         self.watchdog_running = False
         self.last_event_time = 0
+        self._has_lounge_screen = False
+        self._last_lounge_screen_time = 0
         if config:
             self.mute_ads = config.mute_ads
             self.skip_ads = config.skip_ads
@@ -180,11 +182,23 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                 )
                 if device["type"] == "LOUNGE_SCREEN":
                     screen_seen = True
+                    self._has_lounge_screen = True
+                    self._last_lounge_screen_time = asyncio.get_event_loop().time()
                     if device_info.get("clientName", "") in youtube_client_blacklist:
                         self._sid = None
                         self._gsession = None  # Force disconnect
             if not screen_seen:
-                self.logger.info("loungeStatus did not include a LOUNGE_SCREEN receiver")
+                was_connected = self.connected()
+                self._has_lounge_screen = False
+                self._sid = None
+                self._gsession = None
+                self.logger.info(
+                    "loungeStatus did not include a LOUNGE_SCREEN receiver; "
+                    "dropping remote-only session"
+                )
+                if was_connected and self.subscribe_task and not self.subscribe_task.done():
+                    self.logger.debug("Cancelling subscription after receiver disappeared")
+                    self.subscribe_task.cancel()
 
         elif event_type == "onSubtitlesTrackChanged":
             if self.shorts_disconnected:
@@ -255,6 +269,13 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         async with self._command_mutex:
             return await super()._command(command, command_parameters)
 
+    def connected(self) -> bool:
+        """Returns true only when the Lounge session has an attached receiver."""
+        return super().connected() and self._has_lounge_screen
+
+    def has_lounge_screen(self) -> bool:
+        return self._has_lounge_screen
+
     async def change_web_session(self, web_session: ClientSession):
         if self.session is not None:
             await self.session.close()
@@ -280,6 +301,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         if not self.linked():
             raise NotLinkedException("Not linked")
 
+        self._has_lounge_screen = False
+        self._last_lounge_screen_time = 0
         connect_body = {
             "id": self.auth.screen_id,
             "mdx-version": "3",
@@ -326,7 +349,18 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                     self._process_events(events)
                 self._command_offset = 1
                 connected = self.connected()
-                self.logger.info("Passive connect completed (connected=%s)", connected)
+                if super().connected() and not self._has_lounge_screen:
+                    self._sid = None
+                    self._gsession = None
+                    self.logger.warning(
+                        "Connect returned only a remote-control session; "
+                        "will retry until the receiver is present"
+                    )
+                self.logger.info(
+                    "Passive connect completed (connected=%s, receiver=%s)",
+                    connected,
+                    self._has_lounge_screen,
+                )
                 if connected:
                     await self._enforce_auto_play_mode()
                 return connected
