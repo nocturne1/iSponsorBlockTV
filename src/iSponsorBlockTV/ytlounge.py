@@ -313,6 +313,7 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "RID": "1",
             "CVER": "1",
             "capabilities": LOUNGE_CAPABILITIES,
+            "method": "getNowPlaying",
             "ui": "false",
             "app": "ytios-phone-20.15.1",
             "pairing_type": "manual",
@@ -324,7 +325,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             "name": self.device_name,
         }
         self.logger.info(
-            "Connecting with iOS Watch Later mode (app=%s, capabilities=%s)",
+            "Connecting with hybrid iOS Watch Later mode (method=%s, app=%s, capabilities=%s)",
+            connect_body["method"],
             connect_body["app"],
             connect_body["capabilities"],
         )
