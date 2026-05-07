@@ -188,17 +188,22 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                         self._sid = None
                         self._gsession = None  # Force disconnect
             if not screen_seen:
-                was_connected = self.connected()
-                self._has_lounge_screen = False
-                self._sid = None
-                self._gsession = None
-                self.logger.info(
-                    "loungeStatus did not include a LOUNGE_SCREEN receiver; "
-                    "dropping remote-only session"
-                )
-                if was_connected and self.subscribe_task and not self.subscribe_task.done():
-                    self.logger.debug("Cancelling subscription after receiver disappeared")
-                    self.subscribe_task.cancel()
+                if self._has_lounge_screen:
+                    secs_since_receiver = (
+                        asyncio.get_event_loop().time() - self._last_lounge_screen_time
+                    )
+                    self.logger.debug(
+                        "loungeStatus omitted LOUNGE_SCREEN; retaining receiver attachment "
+                        "last seen %.1fs ago",
+                        secs_since_receiver,
+                    )
+                else:
+                    self._sid = None
+                    self._gsession = None
+                    self.logger.info(
+                        "loungeStatus did not include a LOUNGE_SCREEN receiver; "
+                        "dropping remote-only session"
+                    )
 
         elif event_type == "onSubtitlesTrackChanged":
             if self.shorts_disconnected:
