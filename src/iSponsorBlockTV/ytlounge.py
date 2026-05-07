@@ -198,11 +198,9 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                         secs_since_receiver,
                     )
                 else:
-                    self._sid = None
-                    self._gsession = None
                     self.logger.info(
                         "loungeStatus did not include a LOUNGE_SCREEN receiver; "
-                        "dropping remote-only session"
+                        "continuing with remote-only session"
                     )
 
         elif event_type == "onSubtitlesTrackChanged":
@@ -278,8 +276,8 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             return await super()._command(command, command_parameters)
 
     def connected(self) -> bool:
-        """Returns true only when the Lounge session has an attached receiver."""
-        return super().connected() and self._has_lounge_screen
+        """Returns true when the Lounge session is usable for monitoring."""
+        return super().connected()
 
     def has_lounge_screen(self) -> bool:
         return self._has_lounge_screen
@@ -359,12 +357,10 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
                     self._process_events(events)
                 self._command_offset = 1
                 connected = self.connected()
-                if super().connected() and not self._has_lounge_screen:
-                    self._sid = None
-                    self._gsession = None
+                if connected and not self._has_lounge_screen:
                     self.logger.warning(
                         "Connect returned only a remote-control session; "
-                        "will retry until the receiver is present"
+                        "continuing so playback can still be monitored"
                     )
                 self.logger.info(
                     "Passive connect completed (connected=%s, receiver=%s)",
