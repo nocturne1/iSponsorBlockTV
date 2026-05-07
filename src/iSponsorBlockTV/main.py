@@ -70,10 +70,11 @@ class DeviceListener:
             while not (await self.is_available()) and not self.cancelled:
                 self.logger.debug("Waiting for device to be available")
                 await asyncio.sleep(10)
-            try:
-                await lounge_controller.connect()
-            except BaseException:
-                pass
+            if not lounge_controller.connected():
+                try:
+                    await lounge_controller.connect()
+                except BaseException:
+                    pass
             while not lounge_controller.connected() and not self.cancelled:
                 # Doesn't connect to the device if it's a kids profile (it's broken)
                 self.logger.debug("Waiting for device to be connected")
@@ -201,10 +202,10 @@ class DeviceListener:
             return
         if not self.lounge_controller.has_lounge_screen():
             self.logger.warning(
-                "Sending best-effort pre-end pause for %s without a confirmed "
-                "LOUNGE_SCREEN receiver",
+                "Skipping pre-end pause for %s because no LOUNGE_SCREEN receiver is attached",
                 video_id,
             )
+            return
         try:
             self.logger.info("Pausing current video %s before end", video_id)
             await self.lounge_controller.pause()
