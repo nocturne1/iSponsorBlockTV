@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-alpine3.21 AS base
+FROM python:3.13-alpine3.22 AS base
+
+RUN apk upgrade --no-cache
 
 FROM base AS compiler
 
@@ -34,5 +36,8 @@ COPY --from=dep_installer /usr/local /usr/local
 WORKDIR /app
 
 COPY --from=compiler /app .
+
+RUN python3 -m pip uninstall -y pip wheel || true && \
+    find /usr/local/lib/python3.13/ -name "__pycache__" -type d -exec rm -rf {} +
 
 ENTRYPOINT ["python3", "-u", "main.pyc"]
