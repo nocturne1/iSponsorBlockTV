@@ -143,22 +143,3 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ghcr.io/${{ env.REPO_LC }}:${{ steps.meta.outputs.version }}
-
-      - name: Trigger Komodo deploy
-        if: github.ref == 'refs/heads/main'
-        env:
-          WEBHOOK_URL: ${{ secrets.KOMODO_WEBHOOK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.KOMODO_WEBHOOK_SECRET }}
-          CF_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: |
-          PAYLOAD='{"ref":"refs/heads/main"}'
-          SIGNATURE="sha256=$(echo -n "${PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" | awk '{print $2}')"
-          curl -fsS -X POST \
-            -H "Content-Type: application/json" \
-            -H "X-GitHub-Event: push" \
-            -H "X-Hub-Signature-256: ${SIGNATURE}" \
-            -H "CF-Access-Client-Id: ${CF_CLIENT_ID}" \
-            -H "CF-Access-Client-Secret: ${CF_CLIENT_SECRET}" \
-            -d "${PAYLOAD}" \
-            "${WEBHOOK_URL}"
