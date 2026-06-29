@@ -20,6 +20,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.71.1
+
 jobs:
   build:
     strategy:
@@ -143,6 +146,23 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ghcr.io/${{ env.REPO_LC }}:${{ steps.meta.outputs.version }}
+
+      - name: Scan image
+        env:
+          TRIVY_USERNAME: ${{ github.repository_owner }}
+          TRIVY_PASSWORD: ${{ secrets.CR_PAT }}
+        run: |
+          docker run --rm \
+            -e TRIVY_USERNAME \
+            -e TRIVY_PASSWORD \
+            -v "${HOME}/.cache/trivy:/root/.cache/" \
+            "${TRIVY_IMAGE}" image \
+              --scanners vuln \
+              --skip-version-check \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --exit-code 1 \
+              ghcr.io/${{ env.REPO_LC }}:${{ steps.meta.outputs.version }}
 
       - name: Trigger deploy webhook
         if: github.ref == 'refs/heads/main'
