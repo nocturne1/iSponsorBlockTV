@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-alpine3.22 AS base
+FROM python:3.13.14-alpine AS base
 
 RUN apk upgrade --no-cache
 
