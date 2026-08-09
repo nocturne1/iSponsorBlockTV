@@ -8,14 +8,7 @@
 
 name: Release Package
 
-on:
-  push:
-    branches:
-      - 'main'
-    tags:
-      - 'v*'
-  release:
-    types: [published]
+on: workflow_dispatch
 
 defaults:
   run:
