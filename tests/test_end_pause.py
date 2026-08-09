@@ -1,9 +1,15 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from iSponsorBlockTV.main import DeviceListener
 from pyytlounge.models import DpadCommand
+
+
+async def immediate_timeout(awaitable, timeout):
+    awaitable.close()
+    raise TimeoutError
 
 
 def playback_state(*, video_id="video", state=1, current_time=0.0, duration=10.0):
@@ -19,6 +25,7 @@ def listener_for_test():
     listener = DeviceListener.__new__(DeviceListener)
     listener.task = None
     listener._end_return_task = None
+    listener._playlist_transition_event = asyncio.Event()
     listener._current_video_id = "video"
     listener.api_helper = SimpleNamespace(get_segments=AsyncMock(return_value=[]))
     listener.lounge_controller = SimpleNamespace(
@@ -46,7 +53,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
         listener._return_to_playlist_before_end.assert_awaited_once()
         video_id, delay, expected_end = listener._return_to_playlist_before_end.await_args.args
         self.assertEqual(video_id, "video")
-        self.assertAlmostEqual(delay, 1.5)
+        self.assertAlmostEqual(delay, 2.0)
         self.assertAlmostEqual(expected_end, 103.0)
 
     async def test_video_change_cancels_scheduled_return(self):
@@ -67,6 +74,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("iSponsorBlockTV.main.asyncio.sleep", new=AsyncMock()),
+            patch("iSponsorBlockTV.main.asyncio.wait_for", side_effect=immediate_timeout),
             patch("iSponsorBlockTV.main.time.monotonic", return_value=100.0),
         ):
             await listener._return_to_playlist_before_end("video", 0, 101.0)
@@ -83,23 +91,64 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
 
         listener.lounge_controller.send_dpad_command.assert_not_awaited()
 
-    async def test_back_sequence_stops_if_video_changes_between_commands(self):
+    async def test_playlist_transition_after_first_back_stops_sequence(self):
         listener = listener_for_test()
-        sleep_count = 0
 
-        async def change_video(_delay):
-            nonlocal sleep_count
-            sleep_count += 1
-            if sleep_count == 2:
-                listener._current_video_id = "next-video"
+        async def signal_transition(_command):
+            listener._playlist_transition_event.set()
+
+        listener.lounge_controller.send_dpad_command.side_effect = signal_transition
 
         with (
-            patch("iSponsorBlockTV.main.asyncio.sleep", side_effect=change_video),
+            patch("iSponsorBlockTV.main.asyncio.sleep", new=AsyncMock()),
             patch("iSponsorBlockTV.main.time.monotonic", return_value=100.0),
         ):
             await listener._return_to_playlist_before_end("video", 0, 101.0)
 
         listener.lounge_controller.send_dpad_command.assert_awaited_once_with(DpadCommand.BACK)
+
+    async def test_back_sequence_stops_if_video_changes_during_transition_wait(self):
+        listener = listener_for_test()
+
+        async def change_video(awaitable, timeout):
+            awaitable.close()
+            listener._current_video_id = "next-video"
+            raise TimeoutError
+
+        with (
+            patch("iSponsorBlockTV.main.asyncio.sleep", new=AsyncMock()),
+            patch("iSponsorBlockTV.main.asyncio.wait_for", side_effect=change_video),
+            patch("iSponsorBlockTV.main.time.monotonic", return_value=100.0),
+        ):
+            await listener._return_to_playlist_before_end("video", 0, 101.0)
+
+        listener.lounge_controller.send_dpad_command.assert_awaited_once_with(DpadCommand.BACK)
+
+    async def test_transition_at_timeout_suppresses_fallback_back(self):
+        listener = listener_for_test()
+
+        async def signal_then_timeout(awaitable, timeout):
+            awaitable.close()
+            listener._playlist_transition_event.set()
+            raise TimeoutError
+
+        with (
+            patch("iSponsorBlockTV.main.asyncio.sleep", new=AsyncMock()),
+            patch("iSponsorBlockTV.main.asyncio.wait_for", side_effect=signal_then_timeout),
+            patch("iSponsorBlockTV.main.time.monotonic", return_value=100.0),
+        ):
+            await listener._return_to_playlist_before_end("video", 0, 101.0)
+
+        listener.lounge_controller.send_dpad_command.assert_awaited_once_with(DpadCommand.BACK)
+
+    async def test_stopped_state_without_video_signals_playlist_transition(self):
+        listener = listener_for_test()
+        listener.process_playstatus = AsyncMock()
+
+        await listener(playback_state(video_id="", state=-1, duration=0.0))
+        await listener.task
+
+        self.assertTrue(listener._playlist_transition_event.is_set())
 
     async def test_disconnected_session_does_not_send_back_commands(self):
         listener = listener_for_test()
@@ -119,6 +168,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("iSponsorBlockTV.main.asyncio.sleep", new=sleep),
+            patch("iSponsorBlockTV.main.asyncio.wait_for", side_effect=immediate_timeout),
             patch("iSponsorBlockTV.main.time.monotonic", return_value=140.0),
         ):
             await listener._return_to_playlist_before_end("video", 100.0, 200.0)
@@ -126,7 +176,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
         listener.lounge_controller.get_now_playing.assert_awaited_once_with()
         self.assertEqual(
             sleep.await_args_list,
-            [call(40.0), call(58.5), call(1.0)],
+            [call(40.0), call(59.0)],
         )
         self.assertEqual(
             listener.lounge_controller.send_dpad_command.await_args_list,

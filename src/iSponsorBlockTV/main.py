@@ -11,8 +11,8 @@ from . import api_helpers, ytlounge
 from .debug_helpers import AiohttpTracer
 
 
-END_RETURN_LEAD_SECONDS = 1.5
-END_BACK_DELAY_SECONDS = 1.0
+END_RETURN_LEAD_SECONDS = 1.0
+END_TRANSITION_WAIT_SECONDS = 0.5
 END_BACK_PRESS_COUNT = 2
 END_SEGMENT_MARGIN_SECONDS = 2.0
 POSITION_REFRESH_THRESHOLD_SECONDS = 90
@@ -23,6 +23,7 @@ class DeviceListener:
     def __init__(self, api_helper, config, device, debug: bool, web_session):
         self.task: Optional[asyncio.Task] = None
         self._end_return_task: Optional[asyncio.Task] = None
+        self._playlist_transition_event = asyncio.Event()
         self.api_helper = api_helper
         self.offset = device.offset
         self.name = device.name
@@ -91,7 +92,11 @@ class DeviceListener:
             self.task.cancel()
         except BaseException:
             pass
+        if not state.videoId and state.state.value == -1:
+            self.logger.debug("Detected transition from video playback to playlist")
+            self._playlist_transition_event.set()
         if state.videoId and state.videoId != self._current_video_id:
+            self._playlist_transition_event.clear()
             if self._end_return_task and not self._end_return_task.done():
                 self.logger.debug(
                     "Cancelling pre-end return for %s because playback moved to %s",
@@ -192,9 +197,14 @@ class DeviceListener:
             )
             return
 
+        self._playlist_transition_event.clear()
         for press_number in range(1, END_BACK_PRESS_COUNT + 1):
-            if press_number > 1:
-                await asyncio.sleep(END_BACK_DELAY_SECONDS)
+            if press_number > 1 and self._playlist_transition_event.is_set():
+                self.logger.info(
+                    "Playlist transition detected before fallback Back command for %s",
+                    video_id,
+                )
+                return
             if video_id != self._current_video_id:
                 self.logger.info(
                     "Stopping pre-end Back sequence for %s; current video is %s",
@@ -230,6 +240,26 @@ class DeviceListener:
                     END_BACK_PRESS_COUNT,
                     video_id,
                 )
+            if press_number < END_BACK_PRESS_COUNT:
+                try:
+                    await asyncio.wait_for(
+                        self._playlist_transition_event.wait(),
+                        timeout=END_TRANSITION_WAIT_SECONDS,
+                    )
+                except TimeoutError:
+                    self.logger.debug(
+                        "No playlist transition detected %.1fs after Back command for %s",
+                        END_TRANSITION_WAIT_SECONDS,
+                        video_id,
+                    )
+                else:
+                    self.logger.info(
+                        "Playlist transition detected after Back command %d/%d for %s",
+                        press_number,
+                        END_BACK_PRESS_COUNT,
+                        video_id,
+                    )
+                    return
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, video_duration, time_start):
