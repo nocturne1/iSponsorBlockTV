@@ -10,13 +10,21 @@ from . import api_helpers, ytlounge
 from .debug_helpers import AiohttpTracer
 
 
+END_PAUSE_LEAD_SECONDS = 1.5
+END_SEGMENT_MARGIN_SECONDS = 2.0
+POSITION_REFRESH_THRESHOLD_SECONDS = 90
+POSITION_REFRESH_LEAD_SECONDS = 60
+
+
 class DeviceListener:
     def __init__(self, api_helper, config, device, debug: bool, web_session):
         self.task: Optional[asyncio.Task] = None
+        self._end_pause_task: Optional[asyncio.Task] = None
         self.api_helper = api_helper
         self.offset = device.offset
         self.name = device.name
         self.cancelled = False
+        self._current_video_id = None
         self.logger = logging.getLogger(f"iSponsorBlockTV-{device.screen_id}")
         self.web_session = web_session
         self.lounge_controller = ytlounge.YtLoungeApi(
@@ -80,6 +88,15 @@ class DeviceListener:
             self.task.cancel()
         except BaseException:
             pass
+        if state.videoId and state.videoId != self._current_video_id:
+            if self._end_pause_task and not self._end_pause_task.done():
+                self.logger.debug(
+                    "Cancelling pre-end pause for %s because playback moved to %s",
+                    self._current_video_id,
+                    state.videoId,
+                )
+                self._end_pause_task.cancel()
+            self._current_video_id = state.videoId
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
     # Processes the playback state change
@@ -89,11 +106,96 @@ class DeviceListener:
             segments = await self.api_helper.get_segments(state.videoId)
         if state.state.value == 1:  # Playing
             self.logger.info("Playing video %s with %d segments", state.videoId, len(segments))
+            if not self.lounge_controller.auto_play and state.videoId and state.duration > 0:
+                elapsed = time.monotonic() - time_start
+                time_remaining = (
+                    state.duration - state.currentTime
+                ) / self.lounge_controller.playback_speed
+                time_to_pause = time_remaining - elapsed - END_PAUSE_LEAD_SECONDS
+                expected_end = time.monotonic() + max(time_remaining - elapsed, 0)
+                if time_to_pause > 0:
+                    if self._end_pause_task and not self._end_pause_task.done():
+                        self.logger.debug("Rescheduling pre-end pause for %s", state.videoId)
+                        self._end_pause_task.cancel()
+                    self.logger.info(
+                        "Scheduling current-video pre-end pause for %s in %.1fs "
+                        "(%.1fs before %.1fs)",
+                        state.videoId,
+                        time_to_pause,
+                        END_PAUSE_LEAD_SECONDS,
+                        state.duration,
+                    )
+                    self._end_pause_task = asyncio.create_task(
+                        self._pause_current_video_before_end(
+                            state.videoId,
+                            time_to_pause,
+                            expected_end,
+                        )
+                    )
+                else:
+                    self.logger.info(
+                        "Not scheduling pre-end pause for %s; only %.1fs remaining",
+                        state.videoId,
+                        time_remaining,
+                    )
             if segments:  # If there are segments
-                await self.time_to_segment(segments, state.currentTime, time_start)
+                await self.time_to_segment(
+                    segments,
+                    state.currentTime,
+                    state.duration,
+                    time_start,
+                )
+
+    async def _pause_current_video_before_end(self, video_id, delay, expected_end):
+        if delay > POSITION_REFRESH_THRESHOLD_SECONDS:
+            # Refresh near the end so long videos do not accumulate enough timing
+            # drift to let the next playlist item start before the pause arrives.
+            await asyncio.sleep(max(delay - POSITION_REFRESH_LEAD_SECONDS, 0))
+            if video_id != self._current_video_id:
+                self.logger.info(
+                    "Skipping pre-end pause for %s; current video is %s",
+                    video_id,
+                    self._current_video_id,
+                )
+                return
+            self.logger.debug("Requesting position refresh for %s before end", video_id)
+            try:
+                await self.lounge_controller.get_now_playing()
+            except Exception:
+                pass
+            remaining = expected_end - time.monotonic() - END_PAUSE_LEAD_SECONDS
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+        else:
+            await asyncio.sleep(delay)
+
+        if video_id != self._current_video_id:
+            self.logger.info(
+                "Skipping pre-end pause for %s; current video is %s",
+                video_id,
+                self._current_video_id,
+            )
+            return
+        if time.monotonic() >= expected_end:
+            self.logger.warning(
+                "Skipping pre-end pause for %s because wake-up was at or past expected end",
+                video_id,
+            )
+            return
+        if not self.lounge_controller.connected():
+            self.logger.warning(
+                "Skipping pre-end pause for %s because the Lounge session is disconnected",
+                video_id,
+            )
+            return
+        try:
+            self.logger.info("Pausing current video %s before end", video_id)
+            await self.lounge_controller.pause()
+        except Exception:
+            self.logger.exception("Failed to pause current video %s before end", video_id)
 
     # Finds the next segment to skip to and skips to it
-    async def time_to_segment(self, segments, position, time_start):
+    async def time_to_segment(self, segments, position, video_duration, time_start):
         start_next_segment = None
         next_segment = None
         for segment in segments:
@@ -109,6 +211,19 @@ class DeviceListener:
                 start_next_segment = position if is_within_start_range else segment_start
                 break
         if start_next_segment:
+            if (
+                not self.lounge_controller.auto_play
+                and video_duration > 0
+                and next_segment["end"] >= video_duration - END_SEGMENT_MARGIN_SECONDS
+            ):
+                self.logger.info(
+                    "Skipping segment seek to %.3fs (within %.1fs of video end %.3fs); "
+                    "native end-of-video handling will handle it",
+                    next_segment["end"],
+                    END_SEGMENT_MARGIN_SECONDS,
+                    video_duration,
+                )
+                return
             time_to_next = (
                 (start_next_segment - position - (time.monotonic() - time_start))
                 / self.lounge_controller.playback_speed
@@ -129,16 +244,23 @@ class DeviceListener:
         await self.lounge_controller.disconnect()
         if self.task:
             self.task.cancel()
+        if self._end_pause_task:
+            self._end_pause_task.cancel()
         if self.lounge_controller.subscribe_task_watchdog:
             self.lounge_controller.subscribe_task_watchdog.cancel()
         if self.lounge_controller.subscribe_task:
             self.lounge_controller.subscribe_task.cancel()
-        await asyncio.gather(
-            self.task,
-            self.lounge_controller.subscribe_task_watchdog,
-            self.lounge_controller.subscribe_task,
-            return_exceptions=True,
-        )
+        tasks = [
+            task
+            for task in (
+                self.task,
+                self._end_pause_task,
+                self.lounge_controller.subscribe_task_watchdog,
+                self.lounge_controller.subscribe_task,
+            )
+            if task is not None
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def initialize_web_session(self):
         await self.lounge_controller.change_web_session(self.web_session)
