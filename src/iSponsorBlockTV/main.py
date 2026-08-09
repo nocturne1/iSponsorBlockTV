@@ -5,12 +5,15 @@ from signal import SIGINT, SIGTERM, signal
 from typing import Optional
 
 import aiohttp
+from pyytlounge.models import DpadCommand
 
 from . import api_helpers, ytlounge
 from .debug_helpers import AiohttpTracer
 
 
 END_PAUSE_LEAD_SECONDS = 1.5
+END_BACK_DELAY_SECONDS = 1.0
+END_BACK_PRESS_COUNT = 2
 END_SEGMENT_MARGIN_SECONDS = 2.0
 POSITION_REFRESH_THRESHOLD_SECONDS = 90
 POSITION_REFRESH_LEAD_SECONDS = 60
@@ -193,6 +196,39 @@ class DeviceListener:
             await self.lounge_controller.pause()
         except Exception:
             self.logger.exception("Failed to pause current video %s before end", video_id)
+            return
+
+        for press_number in range(1, END_BACK_PRESS_COUNT + 1):
+            await asyncio.sleep(END_BACK_DELAY_SECONDS)
+            if video_id != self._current_video_id:
+                self.logger.info(
+                    "Stopping post-pause Back sequence for %s; current video is %s",
+                    video_id,
+                    self._current_video_id,
+                )
+                return
+            if not self.lounge_controller.connected():
+                self.logger.warning(
+                    "Stopping post-pause Back sequence for %s because the Lounge "
+                    "session is disconnected",
+                    video_id,
+                )
+                return
+            try:
+                self.logger.info(
+                    "Sending post-pause Back command %d/%d for %s",
+                    press_number,
+                    END_BACK_PRESS_COUNT,
+                    video_id,
+                )
+                await self.lounge_controller.send_dpad_command(DpadCommand.BACK)
+            except Exception:
+                self.logger.exception(
+                    "Failed post-pause Back command %d/%d for %s",
+                    press_number,
+                    END_BACK_PRESS_COUNT,
+                    video_id,
+                )
 
     # Finds the next segment to skip to and skips to it
     async def time_to_segment(self, segments, position, video_duration, time_start):
