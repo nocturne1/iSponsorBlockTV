@@ -69,6 +69,19 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
         scheduled_return.cancel.assert_called_once_with()
         self.assertEqual(listener._current_video_id, "next-video")
 
+    async def test_non_playing_state_cancels_scheduled_return(self):
+        listener = listener_for_test()
+        scheduled_return = MagicMock()
+        scheduled_return.done.return_value = False
+        listener._end_return_task = scheduled_return
+        listener.process_playstatus = AsyncMock()
+
+        await listener(playback_state(state=2))
+        await listener.task
+
+        scheduled_return.cancel.assert_called_once_with()
+        self.assertEqual(listener._current_video_id, "video")
+
     async def test_back_commands_are_sent_for_current_connected_video(self):
         listener = listener_for_test()
 
@@ -107,6 +120,18 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
 
         listener.lounge_controller.send_dpad_command.assert_awaited_once_with(DpadCommand.BACK)
 
+    async def test_existing_playlist_transition_prevents_back_sequence(self):
+        listener = listener_for_test()
+        listener._playlist_transition_event.set()
+
+        with (
+            patch("iSponsorBlockTV.main.asyncio.sleep", new=AsyncMock()),
+            patch("iSponsorBlockTV.main.time.monotonic", return_value=100.0),
+        ):
+            await listener._return_to_playlist_before_end("video", 0, 101.0)
+
+        listener.lounge_controller.send_dpad_command.assert_not_awaited()
+
     async def test_back_sequence_stops_if_video_changes_during_transition_wait(self):
         listener = listener_for_test()
 
@@ -143,12 +168,17 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stopped_state_without_video_signals_playlist_transition(self):
         listener = listener_for_test()
+        scheduled_return = MagicMock()
+        scheduled_return.done.return_value = False
+        listener._end_return_task = scheduled_return
         listener.process_playstatus = AsyncMock()
 
         await listener(playback_state(video_id="", state=-1, duration=0.0))
         await listener.task
 
         self.assertTrue(listener._playlist_transition_event.is_set())
+        scheduled_return.cancel.assert_called_once_with()
+        self.assertIsNone(listener._current_video_id)
 
     async def test_disconnected_session_does_not_send_back_commands(self):
         listener = listener_for_test()

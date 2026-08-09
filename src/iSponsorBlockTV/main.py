@@ -92,18 +92,28 @@ class DeviceListener:
             self.task.cancel()
         except BaseException:
             pass
-        if not state.videoId and state.state.value == -1:
+        previous_video_id = self._current_video_id
+        left_playback = not state.videoId and state.state.value == -1
+        video_changed = bool(state.videoId and state.videoId != previous_video_id)
+        if left_playback:
             self.logger.debug("Detected transition from video playback to playlist")
             self._playlist_transition_event.set()
-        if state.videoId and state.videoId != self._current_video_id:
+        if (
+            self._end_return_task
+            and not self._end_return_task.done()
+            and (state.state.value != 1 or not state.videoId or video_changed)
+        ):
+            self.logger.debug(
+                "Cancelling pre-end return for %s after playback changed to %s (state %s)",
+                previous_video_id,
+                state.videoId or "no video",
+                state.state.value,
+            )
+            self._end_return_task.cancel()
+        if left_playback:
+            self._current_video_id = None
+        elif video_changed:
             self._playlist_transition_event.clear()
-            if self._end_return_task and not self._end_return_task.done():
-                self.logger.debug(
-                    "Cancelling pre-end return for %s because playback moved to %s",
-                    self._current_video_id,
-                    state.videoId,
-                )
-                self._end_return_task.cancel()
             self._current_video_id = state.videoId
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
@@ -197,11 +207,12 @@ class DeviceListener:
             )
             return
 
-        self._playlist_transition_event.clear()
         for press_number in range(1, END_BACK_PRESS_COUNT + 1):
-            if press_number > 1 and self._playlist_transition_event.is_set():
+            if self._playlist_transition_event.is_set():
                 self.logger.info(
-                    "Playlist transition detected before fallback Back command for %s",
+                    "Playlist transition detected before Back command %d/%d for %s",
+                    press_number,
+                    END_BACK_PRESS_COUNT,
                     video_id,
                 )
                 return
@@ -285,7 +296,7 @@ class DeviceListener:
             ):
                 self.logger.info(
                     "Skipping segment seek to %.3fs (within %.1fs of video end %.3fs); "
-                    "native end-of-video handling will handle it",
+                    "pre-end return will handle it",
                     next_segment["end"],
                     END_SEGMENT_MARGIN_SECONDS,
                     video_duration,
