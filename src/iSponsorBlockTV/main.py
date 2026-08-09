@@ -11,7 +11,7 @@ from . import api_helpers, ytlounge
 from .debug_helpers import AiohttpTracer
 
 
-END_PAUSE_LEAD_SECONDS = 1.5
+END_RETURN_LEAD_SECONDS = 1.5
 END_BACK_DELAY_SECONDS = 1.0
 END_BACK_PRESS_COUNT = 2
 END_SEGMENT_MARGIN_SECONDS = 2.0
@@ -22,7 +22,7 @@ POSITION_REFRESH_LEAD_SECONDS = 60
 class DeviceListener:
     def __init__(self, api_helper, config, device, debug: bool, web_session):
         self.task: Optional[asyncio.Task] = None
-        self._end_pause_task: Optional[asyncio.Task] = None
+        self._end_return_task: Optional[asyncio.Task] = None
         self.api_helper = api_helper
         self.offset = device.offset
         self.name = device.name
@@ -92,13 +92,13 @@ class DeviceListener:
         except BaseException:
             pass
         if state.videoId and state.videoId != self._current_video_id:
-            if self._end_pause_task and not self._end_pause_task.done():
+            if self._end_return_task and not self._end_return_task.done():
                 self.logger.debug(
-                    "Cancelling pre-end pause for %s because playback moved to %s",
+                    "Cancelling pre-end return for %s because playback moved to %s",
                     self._current_video_id,
                     state.videoId,
                 )
-                self._end_pause_task.cancel()
+                self._end_return_task.cancel()
             self._current_video_id = state.videoId
         self.task = asyncio.create_task(self.process_playstatus(state, time_start))
 
@@ -114,30 +114,30 @@ class DeviceListener:
                 time_remaining = (
                     state.duration - state.currentTime
                 ) / self.lounge_controller.playback_speed
-                time_to_pause = time_remaining - elapsed - END_PAUSE_LEAD_SECONDS
+                time_to_return = time_remaining - elapsed - END_RETURN_LEAD_SECONDS
                 expected_end = time.monotonic() + max(time_remaining - elapsed, 0)
-                if time_to_pause > 0:
-                    if self._end_pause_task and not self._end_pause_task.done():
-                        self.logger.debug("Rescheduling pre-end pause for %s", state.videoId)
-                        self._end_pause_task.cancel()
+                if time_to_return > 0:
+                    if self._end_return_task and not self._end_return_task.done():
+                        self.logger.debug("Rescheduling pre-end return for %s", state.videoId)
+                        self._end_return_task.cancel()
                     self.logger.info(
-                        "Scheduling current-video pre-end pause for %s in %.1fs "
+                        "Scheduling current-video pre-end return for %s in %.1fs "
                         "(%.1fs before %.1fs)",
                         state.videoId,
-                        time_to_pause,
-                        END_PAUSE_LEAD_SECONDS,
+                        time_to_return,
+                        END_RETURN_LEAD_SECONDS,
                         state.duration,
                     )
-                    self._end_pause_task = asyncio.create_task(
-                        self._pause_current_video_before_end(
+                    self._end_return_task = asyncio.create_task(
+                        self._return_to_playlist_before_end(
                             state.videoId,
-                            time_to_pause,
+                            time_to_return,
                             expected_end,
                         )
                     )
                 else:
                     self.logger.info(
-                        "Not scheduling pre-end pause for %s; only %.1fs remaining",
+                        "Not scheduling pre-end return for %s; only %.1fs remaining",
                         state.videoId,
                         time_remaining,
                     )
@@ -149,14 +149,14 @@ class DeviceListener:
                     time_start,
                 )
 
-    async def _pause_current_video_before_end(self, video_id, delay, expected_end):
+    async def _return_to_playlist_before_end(self, video_id, delay, expected_end):
         if delay > POSITION_REFRESH_THRESHOLD_SECONDS:
             # Refresh near the end so long videos do not accumulate enough timing
-            # drift to let the next playlist item start before the pause arrives.
+            # drift to let the next playlist item start before the return begins.
             await asyncio.sleep(max(delay - POSITION_REFRESH_LEAD_SECONDS, 0))
             if video_id != self._current_video_id:
                 self.logger.info(
-                    "Skipping pre-end pause for %s; current video is %s",
+                    "Skipping pre-end return for %s; current video is %s",
                     video_id,
                     self._current_video_id,
                 )
@@ -166,7 +166,7 @@ class DeviceListener:
                 await self.lounge_controller.get_now_playing()
             except Exception:
                 pass
-            remaining = expected_end - time.monotonic() - END_PAUSE_LEAD_SECONDS
+            remaining = expected_end - time.monotonic() - END_RETURN_LEAD_SECONDS
             if remaining > 0:
                 await asyncio.sleep(remaining)
         else:
@@ -174,49 +174,50 @@ class DeviceListener:
 
         if video_id != self._current_video_id:
             self.logger.info(
-                "Skipping pre-end pause for %s; current video is %s",
+                "Skipping pre-end return for %s; current video is %s",
                 video_id,
                 self._current_video_id,
             )
             return
         if time.monotonic() >= expected_end:
             self.logger.warning(
-                "Skipping pre-end pause for %s because wake-up was at or past expected end",
+                "Skipping pre-end return for %s because wake-up was at or past expected end",
                 video_id,
             )
             return
         if not self.lounge_controller.connected():
             self.logger.warning(
-                "Skipping pre-end pause for %s because the Lounge session is disconnected",
+                "Skipping pre-end return for %s because the Lounge session is disconnected",
                 video_id,
             )
             return
-        try:
-            self.logger.info("Pausing current video %s before end", video_id)
-            await self.lounge_controller.pause()
-        except Exception:
-            self.logger.exception("Failed to pause current video %s before end", video_id)
-            return
 
         for press_number in range(1, END_BACK_PRESS_COUNT + 1):
-            await asyncio.sleep(END_BACK_DELAY_SECONDS)
+            if press_number > 1:
+                await asyncio.sleep(END_BACK_DELAY_SECONDS)
             if video_id != self._current_video_id:
                 self.logger.info(
-                    "Stopping post-pause Back sequence for %s; current video is %s",
+                    "Stopping pre-end Back sequence for %s; current video is %s",
                     video_id,
                     self._current_video_id,
                 )
                 return
             if not self.lounge_controller.connected():
                 self.logger.warning(
-                    "Stopping post-pause Back sequence for %s because the Lounge "
+                    "Stopping pre-end Back sequence for %s because the Lounge "
                     "session is disconnected",
+                    video_id,
+                )
+                return
+            if time.monotonic() >= expected_end:
+                self.logger.warning(
+                    "Stopping pre-end Back sequence for %s at or past expected end",
                     video_id,
                 )
                 return
             try:
                 self.logger.info(
-                    "Sending post-pause Back command %d/%d for %s",
+                    "Sending pre-end Back command %d/%d for %s",
                     press_number,
                     END_BACK_PRESS_COUNT,
                     video_id,
@@ -224,7 +225,7 @@ class DeviceListener:
                 await self.lounge_controller.send_dpad_command(DpadCommand.BACK)
             except Exception:
                 self.logger.exception(
-                    "Failed post-pause Back command %d/%d for %s",
+                    "Failed pre-end Back command %d/%d for %s",
                     press_number,
                     END_BACK_PRESS_COUNT,
                     video_id,
@@ -280,8 +281,8 @@ class DeviceListener:
         await self.lounge_controller.disconnect()
         if self.task:
             self.task.cancel()
-        if self._end_pause_task:
-            self._end_pause_task.cancel()
+        if self._end_return_task:
+            self._end_return_task.cancel()
         if self.lounge_controller.subscribe_task_watchdog:
             self.lounge_controller.subscribe_task_watchdog.cancel()
         if self.lounge_controller.subscribe_task:
@@ -290,7 +291,7 @@ class DeviceListener:
             task
             for task in (
                 self.task,
-                self._end_pause_task,
+                self._end_return_task,
                 self.lounge_controller.subscribe_task_watchdog,
                 self.lounge_controller.subscribe_task,
             )
