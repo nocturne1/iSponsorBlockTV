@@ -67,13 +67,40 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.CR_PAT }}
 
-      - name: Build and push
+      - name: Build candidate image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          push: false
+          pull: true
+          no-cache-filters: base
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify image CA trust and service TLS
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.imageid }}
+        run: docker run --rm -i --entrypoint python "$IMAGE_ID" < tests/verify_ca_trust.py
+
+      - name: Test custom end-of-video behavior
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.imageid }}
+        run: >-
+          docker run --rm --entrypoint python
+          -e PYTHONPATH=/app -v "$PWD/tests:/tests:ro"
+          "$IMAGE_ID" -m unittest discover -s /tests -p 'test_*.py' -v
+
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"

@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-alpine3.21 AS base
+FROM python:3.13.16-alpine3.23@sha256:07b20c774a247152e74f622034c1482495d299e070eec620ddff13e01264290b AS base
+
+# aiohttp uses OpenSSL's system roots, independently of certifi.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' && \
+    update-ca-certificates
 
 FROM base AS compiler
 
@@ -30,6 +35,10 @@ ENV PIP_NO_CACHE_DIR=off iSPBTV_docker=True iSPBTV_data_dir=data TERM=xterm-256c
 COPY requirements.txt .
 
 COPY --from=dep_installer /usr/local /usr/local
+
+# COPY cannot remove the base image's pip; remove its roots and ensurepip's recovery wheel.
+RUN python3 -m pip uninstall -y pip && \
+    rm -rf /usr/local/lib/python3.13/ensurepip
 
 WORKDIR /app
 
