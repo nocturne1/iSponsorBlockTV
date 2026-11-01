@@ -13,13 +13,4 @@ class AiohttpTracer:
 
     async def on_response_chunk_received(self, session, context, params):
         chunk_size = len(params.chunk)
-        try:
-            # Try to decode as text
-            text = params.chunk.decode("utf-8")
-            self.logger.debug(f"Response chunk ({id(context):#x}) {chunk_size} bytes: {text}")
-        except UnicodeDecodeError:
-            # If not valid UTF-8, show as hex
-            hex_data = params.chunk.hex()
-            self.logger.debug(
-                f"Response chunk ({id(context):#x}) ({chunk_size} bytes) [HEX]: {hex_data}"
-            )
+        self.logger.debug("Response chunk (%#x): %d bytes", id(context), chunk_size)

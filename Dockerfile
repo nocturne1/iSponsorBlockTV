@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13.16-alpine3.23@sha256:07b20c774a247152e74f622034c1482495d299e070eec620ddff13e01264290b AS base
+FROM python:3.13.18-alpine3.23@sha256:e4aeaca9081549f19bd5bc8605ed5ab257ba34f97e0471f8e09161f45b4b08b8 AS base
 
 # aiohttp uses OpenSSL's system roots, independently of certifi.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' && \
+    apk add --no-cache 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' \
+        'musl>=1.2.5-r24' 'musl-utils>=1.2.5-r24' && \
     update-ca-certificates
 
 FROM base AS compiler

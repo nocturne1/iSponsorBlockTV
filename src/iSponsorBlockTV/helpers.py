@@ -9,6 +9,7 @@ from appdirs import user_data_dir
 
 from . import config_setup, main, setup_wizard
 from .constants import config_file_blacklist_keys, github_wiki_base_url, SponsorBlock_api
+from .log_redaction import SecretRedactingFormatter
 
 
 class Device:
@@ -164,7 +165,9 @@ def cli(ctx, data, debug, http_tracing, setup, setup_cli):
     logger = logging.getLogger()
     ctx.obj["logger"] = logger
     sh = logging.StreamHandler()
-    sh.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    sh.setFormatter(
+        SecretRedactingFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     logger.addHandler(sh)
 
     if debug:
