@@ -9,7 +9,7 @@ from appdirs import user_data_dir
 
 from . import config_setup, main, setup_wizard
 from .constants import config_file_blacklist_keys, github_wiki_base_url, SponsorBlock_api
-from .log_redaction import SecretRedactingFormatter
+from .log_redaction import SecretRedactingFormatter, register_secrets
 
 
 class Device:
@@ -87,6 +87,14 @@ class Config:
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
+                register_secrets(
+                    [config.get("apikey")]
+                    + [
+                        device.get("screen_id")
+                        for device in config.get("devices", []) or []
+                        if isinstance(device, dict)
+                    ]
+                )
                 for i in config:
                     if i not in config_file_blacklist_keys:
                         setattr(self, i, config[i])

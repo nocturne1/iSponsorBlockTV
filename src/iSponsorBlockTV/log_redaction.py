@@ -6,6 +6,7 @@ import logging
 import re
 
 
+_REGISTERED_SECRETS = set()
 _SECRET_KEYS = (
     r"lounge[_ -]?id[_ -]?token|lounge[_ -]?token|refresh[_ -]?token|"
     r"access[_ -]?token|id[_ -]?token|local[_ -]?channel[_ -]?encryption[_ -]?key|"
@@ -38,6 +39,11 @@ _COOKIE_HEADER = re.compile(
 )
 
 
+def register_secrets(values):
+    """Cover configured credentials even when a dependency logs them under a generic field."""
+    _REGISTERED_SECRETS.update(value for value in values if isinstance(value, str) and value)
+
+
 class SecretRedactingFormatter(logging.Formatter):
     def format(self, record):
         if record.name.startswith("iSponsorBlockTV-"):
@@ -47,6 +53,8 @@ class SecretRedactingFormatter(logging.Formatter):
             record.name = f"iSponsorBlockTV-device-{device_label}"
         # Redact after formatting so exception text and dependency log arguments are covered too.
         message = super().format(record)
+        for secret in sorted(_REGISTERED_SECRETS, key=len, reverse=True):
+            message = message.replace(secret, "[REDACTED]")
         for pattern in (
             _TOKEN_MESSAGE,
             _PAIRING_MESSAGE,

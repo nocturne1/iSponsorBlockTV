@@ -4,9 +4,10 @@ import json
 import logging
 import unittest
 from types import SimpleNamespace
+from unittest.mock import mock_open, patch
 
 from iSponsorBlockTV.debug_helpers import AiohttpTracer
-from iSponsorBlockTV.log_redaction import SecretRedactingFormatter
+from iSponsorBlockTV.log_redaction import SecretRedactingFormatter, register_secrets
 
 
 class LogRedactionTests(unittest.TestCase):
@@ -90,6 +91,27 @@ class LogRedactionTests(unittest.TestCase):
         self.assertEqual(first, formatter.format(record))
         self.assertRegex(first, r"^iSponsorBlockTV-device-[0-9a-f]{8} Connected$")
         self.assertEqual(record.name, f"iSponsorBlockTV-{screen_id}")
+
+    def test_configured_credentials_under_generic_fields_are_removed(self):
+        screen_id = "configured-device-identifier-1234567890"
+        api_key = "configured-api-credential-1234567890"
+        register_secrets([screen_id, api_key, "", None])
+        self.logger.debug("Device %s response %s", {"id": screen_id, "state": 1}, api_key)
+        self.assert_secret_removed(screen_id)
+        self.assert_secret_removed(api_key)
+        self.assertIn("'state': 1", self.output.getvalue())
+
+    def test_configuration_load_registers_credentials_before_logging(self):
+        from iSponsorBlockTV.helpers import Config
+
+        screen_id = "loaded-device-identifier-1234567890"
+        api_key = "loaded-api-credential-1234567890"
+        config = json.dumps({"devices": [{"screen_id": screen_id}], "apikey": api_key})
+        with patch("builtins.open", mock_open(read_data=config)):
+            Config("/unused-config")
+        self.logger.info("Loaded device %s and credential %s", screen_id, api_key)
+        self.assert_secret_removed(screen_id)
+        self.assert_secret_removed(api_key)
 
     def test_quoted_password_escapes_do_not_leak_suffix(self):
         secret = "prefix'and\"suffix"
