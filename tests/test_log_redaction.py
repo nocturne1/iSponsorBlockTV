@@ -67,6 +67,30 @@ class LogRedactionTests(unittest.TestCase):
         self.logger.debug("Authorization: Bearer header-secret")
         self.assert_secret_removed("header-secret")
 
+    def test_cookie_header_does_not_leak_additional_cookies(self):
+        self.logger.debug("Cookie: SID=first-secret; other=second-secret")
+        self.assert_secret_removed("first-secret")
+        self.assert_secret_removed("second-secret")
+
+    def test_screen_id_fields_and_warning_messages_are_redacted(self):
+        screen_id = "private-screen-id-12345678901234567890"
+        self.logger.debug("Device %s", {"screenId": screen_id})
+        self.logger.warning("The screen id %s uses the old format", screen_id)
+        self.assert_secret_removed(screen_id)
+        self.assertIn("uses the old format", self.output.getvalue())
+
+    def test_device_logger_name_uses_stable_label_without_changing_record(self):
+        screen_id = "private-screen-id-12345678901234567890"
+        record = logging.LogRecord(
+            f"iSponsorBlockTV-{screen_id}", logging.INFO, "", 0, "Connected", (), None
+        )
+        formatter = SecretRedactingFormatter("%(name)s %(message)s")
+        first = formatter.format(record)
+        self.assertNotIn(screen_id, first)
+        self.assertEqual(first, formatter.format(record))
+        self.assertRegex(first, r"^iSponsorBlockTV-device-[0-9a-f]{8} Connected$")
+        self.assertEqual(record.name, f"iSponsorBlockTV-{screen_id}")
+
     def test_quoted_password_escapes_do_not_leak_suffix(self):
         secret = "prefix'and\"suffix"
         self.logger.debug("Auth %s", {"password": secret, "state": 1})
