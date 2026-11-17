@@ -97,7 +97,6 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
         it cancels the current subscription.
         """
         self.watchdog_running = True
-        self.last_event_time = asyncio.get_running_loop().time()
 
         try:
             while self.watchdog_running:
@@ -144,9 +143,24 @@ class YtLoungeApi(pyytlounge.YtLoungeApi):
             except (asyncio.CancelledError, Exception):
                 pass
 
-        self.subscribe_task = asyncio.create_task(super().subscribe())
+        self.last_event_time = asyncio.get_running_loop().time()
+        self.subscribe_task = asyncio.create_task(self._subscribe_with_resume())
         self.subscribe_task_watchdog = asyncio.create_task(self._watchdog())
         return self.subscribe_task
+
+    async def _subscribe_with_resume(self):
+        try:
+            while self.connected():
+                last_event_time = self.last_event_time
+                await super().subscribe()
+                if not self.connected() or self.last_event_time <= last_event_time:
+                    return
+                # A Lounge stream can close while its session is still usable.
+                self.logger.info("Lounge event stream closed, resubscribing to the same session")
+        finally:
+            if self.subscribe_task_watchdog:
+                self.subscribe_task_watchdog.cancel()
+                await asyncio.gather(self.subscribe_task_watchdog, return_exceptions=True)
 
     # Process a lounge subscription event
     # skipcq: PY-R1000
