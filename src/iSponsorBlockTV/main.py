@@ -11,7 +11,8 @@ from . import api_helpers, ytlounge
 from .debug_helpers import AiohttpTracer
 
 
-END_RETURN_LEAD_SECONDS = 1.0
+# Leave time for the first command and fallback before the TV reports the video ended.
+END_RETURN_LEAD_SECONDS = 2.0
 END_TRANSITION_WAIT_SECONDS = 0.5
 END_BACK_PRESS_COUNT = 2
 END_SEGMENT_MARGIN_SECONDS = 2.0

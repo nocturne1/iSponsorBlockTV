@@ -53,7 +53,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
         listener._return_to_playlist_before_end.assert_awaited_once()
         video_id, delay, expected_end = listener._return_to_playlist_before_end.await_args.args
         self.assertEqual(video_id, "video")
-        self.assertAlmostEqual(delay, 2.0)
+        self.assertAlmostEqual(delay, 1.0)
         self.assertAlmostEqual(expected_end, 103.0)
 
     async def test_video_change_cancels_scheduled_return(self):
@@ -206,7 +206,7 @@ class EndReturnTests(unittest.IsolatedAsyncioTestCase):
         listener.lounge_controller.get_now_playing.assert_awaited_once_with()
         self.assertEqual(
             sleep.await_args_list,
-            [call(40.0), call(59.0)],
+            [call(40.0), call(58.0)],
         )
         self.assertEqual(
             listener.lounge_controller.send_dpad_command.await_args_list,
