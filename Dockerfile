@@ -4,6 +4,7 @@ FROM python:3.13.18-alpine3.23@sha256:e4aeaca9081549f19bd5bc8605ed5ab257ba34f97e
 # aiohttp uses OpenSSL's system roots, independently of certifi.
 RUN apk upgrade --no-cache && \
     apk add --no-cache 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' \
+        'libcrypto3>=3.5.9-r1' 'libssl3>=3.5.9-r1' \
         'musl>=1.2.5-r24' 'musl-utils>=1.2.5-r24' && \
     update-ca-certificates
 

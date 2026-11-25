@@ -1,5 +1,5 @@
 aiohttp==3.14.5
-certifi==2026.10.23
+certifi==2026.11.20
 appdirs==1.4.4
 async-cache==1.1.1
 pyytlounge==3.3.0
